@@ -1,0 +1,39 @@
+name: sign-status
+on:
+  push:
+    paths: [status.txt]
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sign
+        run: |
+          set -e
+          S=$(head -n1 status.txt | tr -d '[:space:]')
+          N=$(( $(head -n1 seq.txt | tr -d '[:space:]') + 1 ))
+          T=$(date +%s)
+          MSG="$S|$T|$N"
+          printf '%s' "$MSG" > msg.bin
+          printf '%s' "$SIGN_KEY_PEM" > key.pem
+          openssl pkeyutl -sign -inkey key.pem -rawin -in msg.bin -out sig.bin
+          SIG=$(base64 -w0 sig.bin)
+          printf '{"s":"%s","t":%s,"n":%s,"sig":"%s"}\n' "$S" "$T" "$N" "$SIG" > status.json
+          echo "$N" > seq.txt
+          rm -f key.pem msg.bin sig.bin
+        env:
+          SIGN_KEY_PEM: ${{ secrets.SIGN_KEY_PEM }}
+      - name: Commit
+        run: |
+          git config user.name  "status-bot"
+          git config user.email "status-bot@users.noreply.github.com"
+          git add status.json seq.txt
+          git commit -m "sign" || exit 0
+          git push
